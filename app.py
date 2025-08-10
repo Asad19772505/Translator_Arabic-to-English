@@ -2,7 +2,7 @@ import os
 import tempfile
 import streamlit as st
 
-# =============== Translation core (same as before, with fallback) ===============
+# ------------ Translation core ------------
 def translate_text(text, src_lang="auto", tgt_lang="en"):
     try:
         from googletrans import Translator
@@ -21,42 +21,52 @@ def translate_text(text, src_lang="auto", tgt_lang="en"):
                 f"deep-translator error: {e_deep}"
             )
 
-# =============== ASR (speech-to-text) using faster-whisper on CPU ===============
+# ------------ ASR ------------
 @st.cache_resource
 def load_asr():
-    # 'base' is a good CPU default; you can try 'small' if your instance is stronger
     from faster_whisper import WhisperModel
-    # int8 is light for CPU; change to "float32" if you prefer accuracy over speed
     return WhisperModel("base", device="cpu", compute_type="int8")
 
 def transcribe_audio_file(path, lang_hint=None):
-    """
-    Transcribe an audio file using faster-whisper.
-    lang_hint: None (auto-detect) or language code like 'ar', 'en'
-    """
     model = load_asr()
     segments, info = model.transcribe(path, language=lang_hint, beam_size=1)
     text = "".join(seg.text for seg in segments).strip()
-    detected = info.language if hasattr(info, "language") else lang_hint or "auto"
+    detected = getattr(info, "language", None) or lang_hint or "auto"
     return text, detected
 
-# =============== UI =================
+# ------------ UI ------------
 st.set_page_config(page_title="Arabic ↔ English Translator (Text + Voice)", layout="wide")
 st.title("Arabic ↔ English Translator")
 
-tabs = st.tabs(["Text", "Voice (Mic / Upload)"])
+tab_text, tab_voice = st.tabs(["Text", "Voice (Mic / Upload)"])
 
-# ---------------- TEXT TAB ----------------
-with tabs[0]:
+# ===== TEXT TAB =====
+with tab_text:
     with st.expander("Settings", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
-            src_text = st.selectbox("Source language", ["auto", "ar", "en", "fr", "ur"], index=0)
+            src_text = st.selectbox(
+                "Source language (text)",
+                ["auto", "ar", "en", "fr", "ur"],
+                index=0,
+                key="src_text_sel",
+            )
         with c2:
-            dest_text = st.selectbox("Target language", ["en", "ar", "fr", "ur"], index=0)
+            dest_text = st.selectbox(
+                "Target language (text)",
+                ["en", "ar", "fr", "ur"],
+                index=0,
+                key="dest_text_sel",
+            )
 
-    text_in = st.text_area("Enter text to translate", height=160, placeholder="اكتب النص العربي هنا…")
-    if st.button("Translate Text", type="primary"):
+    text_in = st.text_area(
+        "Enter text to translate",
+        height=160,
+        placeholder="اكتب النص العربي هنا…",
+        key="text_input_area",
+    )
+
+    if st.button("Translate Text", type="primary", key="btn_translate_text"):
         if not text_in.strip():
             st.warning("Please enter some text to translate.")
         else:
@@ -64,74 +74,89 @@ with tabs[0]:
                 try:
                     out, engine = translate_text(text_in.strip(), src_lang=src_text, tgt_lang=dest_text)
                     st.success(f"Translated with **{engine}**")
-                    st.text_area("Translation", value=out, height=160)
+                    st.text_area("Translation (text tab)", value=out, height=160, key="text_output_area")
                 except Exception as e:
                     st.error(f"Translation failed.\n\n{e}")
 
-# ---------------- VOICE TAB ----------------
-with tabs[1]:
+# ===== VOICE TAB =====
+with tab_voice:
     st.write("Record with your browser mic **or** upload an audio file (wav/mp3/m4a).")
-    left, right = st.columns([1, 1])
 
-    # Settings
     with st.expander("Voice Settings", expanded=True):
         v1, v2, v3 = st.columns(3)
         with v1:
-            src_voice = st.selectbox("Source speech language", ["auto", "ar", "en", "fr", "ur"], index=1)
+            src_voice = st.selectbox(
+                "Source speech language (voice)",
+                ["auto", "ar", "en", "fr", "ur"],
+                index=1,
+                key="src_voice_sel",
+            )
         with v2:
-            dest_voice = st.selectbox("Target language", ["en", "ar", "fr", "ur"], index=0)
+            dest_voice = st.selectbox(
+                "Target language (voice)",
+                ["en", "ar", "fr", "ur"],
+                index=0,
+                key="dest_voice_sel",
+            )
         with v3:
-            auto_translate = st.checkbox("Auto-translate after transcription", value=True)
-
-    # ---- Option A: Browser microphone (streamlit-audiorecorder) ----
-    with left:
-        st.subheader("🎙️ Record")
-        mic_ok = True
-        audio_bytes = None
-        try:
-            from audiorecorder import audiorecorder  # component
-            audio = audiorecorder("Start recording", "Stop recording")
-            # The component returns a pydub.AudioSegment when audio is recorded.
-            if audio and len(audio) > 0:
-                st.audio(audio.export(format="wav").read(), format="audio/wav")
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                    audio.export(tmp.name, format="wav")
-                    audio_bytes = tmp.name
-        except Exception as e:
-            mic_ok = False
-            st.info(
-                "Mic recorder component unavailable in this environment.\n"
-                "You can still upload an audio file on the right."
+            auto_translate = st.checkbox(
+                "Auto-translate after transcription",
+                value=True,
+                key="auto_translate_chk",
             )
 
-        if audio_bytes and st.button("Transcribe Recording", use_container_width=True):
+    left, right = st.columns(2)
+
+    # ---- A) Browser mic ----
+    with left:
+        st.subheader("🎙️ Record")
+        audio_tmp_path = None
+        try:
+            from audiorecorder import audiorecorder
+            audio = audiorecorder("Start recording", "Stop recording", key="audiorecorder_widget")
+            if audio and len(audio) > 0:
+                wav_bytes = audio.export(format="wav").read()
+                st.audio(wav_bytes, format="audio/wav")
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                    tmp.write(wav_bytes)
+                    audio_tmp_path = tmp.name
+        except Exception:
+            st.info("Mic recorder component not available here. Use the Upload panel on the right.")
+
+        if audio_tmp_path and st.button("Transcribe Recording", use_container_width=True, key="btn_transcribe_mic"):
             with st.spinner("Transcribing…"):
                 try:
                     hint = None if src_voice == "auto" else src_voice
-                    transcript, detected = transcribe_audio_file(audio_bytes, lang_hint=hint)
+                    transcript, detected = transcribe_audio_file(audio_tmp_path, lang_hint=hint)
                     st.success(f"Transcribed (detected: **{detected}**)")
-                    st.text_area("Transcript", transcript, height=140, key="tx_mic")
+                    st.text_area("Transcript (mic)", transcript, height=140, key="tx_mic_area")
 
                     if auto_translate and transcript.strip():
                         out, engine = translate_text(transcript, src_lang=src_voice, tgt_lang=dest_voice)
                         st.success(f"Translated with **{engine}**")
-                        st.text_area("Translation", out, height=140, key="tr_mic")
+                        st.text_area("Translation (mic)", out, height=140, key="tr_mic_area")
                 except Exception as e:
                     st.error(f"Transcription failed.\n\n{e}")
                 finally:
                     try:
-                        os.unlink(audio_bytes)
+                        os.unlink(audio_tmp_path)
                     except Exception:
                         pass
 
-    # ---- Option B: File upload ----
+    # ---- B) Upload file ----
     with right:
         st.subheader("📤 Upload")
-        up = st.file_uploader("Upload audio (wav/mp3/m4a)", type=["wav", "mp3", "m4a"], accept_multiple_files=False)
+        up = st.file_uploader(
+            "Upload audio (wav/mp3/m4a)",
+            type=["wav", "mp3", "m4a"],
+            accept_multiple_files=False,
+            key="uploader_voice",
+        )
         if up is not None:
-            st.audio(up, format="audio/wav")
-            if st.button("Transcribe Upload", use_container_width=True):
+            st.audio(up, format="audio/wav", start_time=0)
+            if st.button("Transcribe Upload", use_container_width=True, key="btn_transcribe_upload"):
                 with st.spinner("Transcribing…"):
+                    tmp_path = None
                     try:
                         with tempfile.NamedTemporaryFile(suffix=f".{up.name.split('.')[-1]}", delete=False) as tmp:
                             tmp.write(up.read())
@@ -139,18 +164,19 @@ with tabs[1]:
                         hint = None if src_voice == "auto" else src_voice
                         transcript, detected = transcribe_audio_file(tmp_path, lang_hint=hint)
                         st.success(f"Transcribed (detected: **{detected}**) from uploaded file")
-                        st.text_area("Transcript", transcript, height=140, key="tx_up")
+                        st.text_area("Transcript (upload)", transcript, height=140, key="tx_up_area")
 
                         if auto_translate and transcript.strip():
                             out, engine = translate_text(transcript, src_lang=src_voice, tgt_lang=dest_voice)
                             st.success(f"Translated with **{engine}**")
-                            st.text_area("Translation", out, height=140, key="tr_up")
+                            st.text_area("Translation (upload)", out, height=140, key="tr_up_area")
                     except Exception as e:
                         st.error(f"Transcription failed.\n\n{e}")
                     finally:
-                        try:
-                            os.unlink(tmp_path)
-                        except Exception:
-                            pass
+                        if tmp_path:
+                            try:
+                                os.unlink(tmp_path)
+                            except Exception:
+                                pass
 
 st.caption("Note: googletrans/deep-translator use unofficial Google endpoints; rate limits may apply. ASR runs locally via faster-whisper.")
