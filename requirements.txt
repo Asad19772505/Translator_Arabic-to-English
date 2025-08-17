@@ -1,4 +1,5 @@
-streamlit
-googletrans==4.0.0-rc1
-SpeechRecognition
-pyttsx3
+streamlit>=1.48
+groq>=0.31.0
+python-dotenv>=1.0.1
+audio-recorder-streamlit>=0.0.10
+httpx>=0.28
