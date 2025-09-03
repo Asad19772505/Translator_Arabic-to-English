@@ -20,7 +20,7 @@ API_KEY = os.getenv("GROQ_API_KEY")
 
 with st.sidebar:
     st.header("Settings")
-    timeout_sec = st.slider("Request timeout (seconds)", 30, 3600, 180, step=30)
+    timeout_sec = st.slider("Request timeout (seconds)", 30, 6000, 180, step=30)
     st.caption("Increase if you process longer audio files.")
 
     if not API_KEY:
