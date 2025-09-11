@@ -1,5 +1,9 @@
-streamlit>=1.48
-groq>=0.31.0
-python-dotenv>=1.0.1
-audio-recorder-streamlit>=0.0.10
-httpx>=0.28
+streamlit
+python-dotenv
+audio-recorder-streamlit
+groq
+httpx
+pillow
+pymupdf
+python-docx
+pytesseract
